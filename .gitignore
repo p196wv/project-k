@@ -1,0 +1,26 @@
+.godot/
+*.import
+*.tmp
+*.log
+
+# Local/editor artifacts and distributable builds
+builds/
+*.unitypackage
+Medieval_props_free.png
+Medieval_props_free.png.import
+Medieval_tiles_free_2.0.png
+Medieval_tiles_free_2.0.png.import
+BlueWizard/
+Mossy Tileset/
+Plant Animations/
+Puny-Characters/
+
+# The game uses the four loop-ready OGG tracks below. Keep large source WAV/MP3
+# masters out of version control so a fresh clone remains practical.
+xDeviruchi - 16 bit Fantasy & Adventure (2025)/mp3/
+xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/wav/
+xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/ogg/*
+!xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/ogg/02 - Title Theme.ogg
+!xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/ogg/04 - Silent Forest.ogg
+!xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/ogg/06 - Victory!.ogg
+!xDeviruchi - 16 bit Fantasy & Adventure (2025)/Loopable + one shots/ogg/17 - Decisive Battle 2 - The Calamity.ogg
