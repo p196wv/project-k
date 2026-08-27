@@ -51,10 +51,15 @@ func run_smoke_test() -> void:
 	await get_tree().process_frame
 	assert(GameState.phase == "farm")
 	assert(music_player.stream is AudioStreamOggVorbis and music_player.stream.loop)
-	assert(current_screen.enemies.size() == 10)
+	assert(current_screen.enemies.size() == 14)
 	assert(current_screen.walls.size() >= 8)
 	assert(current_screen.plants.size() >= 16)
 	assert(current_screen.walls[0].collision_size == current_screen.walls[0].wall_size)
+	# 从每堵墙的下方向上跨越整个可见区域，必须被实体碰撞阻挡。
+	for test_wall in current_screen.walls:
+		var bottom_start: Vector2 = test_wall.global_position + Vector2(0,test_wall.wall_size.y * 0.5 + 42.0)
+		var cross_up: Vector2 = Vector2(0,-test_wall.wall_size.y - 84.0)
+		assert(current_screen.player.test_move(Transform2D(0.0,bottom_start),cross_up))
 	assert(not (current_screen.plants[0] is CollisionObject2D))
 	assert(current_screen.is_environment_position_open(current_screen.plants[0].global_position,5.0))
 	assert(current_screen.enemies.any(func(enemy): return enemy.role == "ranger"))
@@ -112,10 +117,12 @@ func run_smoke_test() -> void:
 	current_screen.on_equipment_picked("bow")
 	assert(current_screen.player.has_weapon("bow"))
 	assert(current_screen.player.current_weapon == "bow")
+	assert(current_screen.player.temporary_weapon_left > 9.9)
 	current_screen.on_equipment_picked("arcane_staff")
 	assert(current_screen.player.has_weapon("arcane_staff"))
 	assert(current_screen.player.current_weapon == "arcane_staff")
-	current_screen.player.equip_weapon("bow")
+	assert(not current_screen.player.has_weapon("bow"))
+	current_screen.on_equipment_picked("bow")
 	for test_enemy in current_screen.enemies:
 		if test_enemy != front_enemy:
 			test_enemy.process_mode = Node.PROCESS_MODE_DISABLED
@@ -129,8 +136,11 @@ func run_smoke_test() -> void:
 	await get_tree().create_timer(0.52).timeout
 	print("[SMOKE] bow target hp ",bow_target_hp," -> ",front_enemy.hp)
 	assert(front_enemy.hp == bow_target_hp - 9)
-	current_screen.player.equip_weapon("basic")
-	print("[SMOKE] equipment unlock, switching and bow projectile PASS")
+	current_screen.player.temporary_weapon_left = 0.01
+	await get_tree().create_timer(0.08).timeout
+	assert(current_screen.player.current_weapon == "basic")
+	assert(not current_screen.player.has_weapon("bow"))
+	print("[SMOKE] ten-second temporary weapons and bow projectile PASS")
 	var hp_before_arrow: int = GameState.player_hp
 	current_screen.player.invincible_left = 0.0
 	current_screen.on_enemy_ranged_attack(current_screen.player.global_position - Vector2(120,0),Vector2.RIGHT,6)
@@ -227,6 +237,7 @@ func run_smoke_test() -> void:
 	assert(current_screen.player.combo_step == 3)
 	print("[SMOKE] player three-hit input chain PASS")
 	print("[SMOKE] farm -> cards: ", GameState.ammo_library)
+	current_screen.player.activate_temporary_weapon("bow",0.24)
 	show_boss()
 	await get_tree().process_frame
 	assert(GameState.phase == "boss")
@@ -235,9 +246,27 @@ func run_smoke_test() -> void:
 	assert(current_screen.arena_walls.size() == 4)
 	for arena_wall in current_screen.arena_walls:
 		assert(arena_wall.collision_size == arena_wall.wall_size)
+	assert(current_screen.player.current_weapon == "bow")
 	assert(current_screen.player.has_weapon("bow"))
-	assert(current_screen.player.has_weapon("arcane_staff"))
-	print("[SMOKE] compact arena, full-solid bounds and weapon carry PASS")
+	assert(not current_screen.player.has_weapon("arcane_staff"))
+	await get_tree().create_timer(0.3).timeout
+	assert(current_screen.player.current_weapon == "basic")
+	assert(not current_screen.player.has_weapon("bow"))
+	print("[SMOKE] compact arena, full-solid bounds and cross-scene weapon expiry PASS")
+	for _hit in range(4):
+		current_screen.boss.take_damage(10,current_screen.player.global_position)
+	assert(current_screen.boss_loot_drops == 1)
+	assert(current_screen.active_loot.size() == 1)
+	GameState.player_hp = GameState.player_max_hp - 20
+	current_screen.active_loot[0].on_body_entered(current_screen.player)
+	assert(GameState.player_hp == GameState.player_max_hp - 4)
+	await get_tree().process_frame
+	current_screen.spawn_boss_loot(current_screen.boss.global_position)
+	assert(current_screen.boss_loot_drops == 2)
+	assert(current_screen.active_loot.size() == 1)
+	current_screen.active_loot[0]._on_body_entered(current_screen.player)
+	assert(current_screen.player.current_weapon == "bow")
+	print("[SMOKE] boss damage loot, healing potion and temporary weapon PASS")
 	current_screen.player.position = Vector2(510,390)
 	current_screen.boss.position = Vector2(620,390)
 	current_screen.player.invincible_left = 0.0
@@ -381,7 +410,6 @@ func show_menu() -> void:
 	ui.add_child(box)
 	box.add_child(make_label("PROJECT K", 58, Color("72e1ff"), HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(make_label("PIXEL ACTION ROGUELITE", 20, Color("c8b47a"), HORIZONTAL_ALIGNMENT_CENTER))
-	box.add_child(make_label("你打死的怪，就是你的牌。", 24, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(make_label("第一章 · 翡翠林地", 18, Color("9ee879"), HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(make_spacer(20))
 	box.add_child(make_button("开始游戏", show_class_select))
@@ -416,7 +444,7 @@ func show_controls() -> void:
 	var ui := make_full_panel(Color("101522"))
 	current_screen = ui
 	add_child(ui)
-	var text := "操作说明\n\nWASD / 方向键：八方向移动\n连续 J / 鼠标左键：基础法杖三段连招\nQ / 鼠标右键：元气弹（消耗法力）\nK / Shift：翻滚（短暂无敌）\n1 / 2 / 3：基础法杖 / 远程法杖 / 弓\n\n怪物约 40% 概率掉落卡牌\n清理至 2 只残敌后推进兽潮\n成长选择与 BOSS 转阶段期间战斗暂停\n\n炎魔共有三个阶段\n观察冲锋、火球与雷暴预警，使用卡牌削弱下一阶段"
+	var text := "操作说明\n\nWASD / 方向键：八方向移动\n连续 J / 鼠标左键：基础法杖三段连招\nQ / 鼠标右键：元气弹（消耗法力）\nK / Shift：翻滚（短暂无敌）\n1 / 2 / 3：基础法杖 / 远程法杖 / 弓\n掉落武器拾取后持续 10 秒\n\n怪物约 40% 概率掉落卡牌\n清理至 2 只残敌后推进兽潮\n成长选择与 BOSS 转阶段期间战斗暂停\n\n炎魔共有三个阶段\n观察冲锋、火球与雷暴预警，使用卡牌削弱下一阶段"
 	var label := make_label(text, 25, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	label.position = Vector2(260, 90)
 	label.size = Vector2(760, 470)

@@ -13,8 +13,11 @@ const WeaponProjectileScript = preload("res://entities/effects/PlayerWeaponProje
 const PixelMagicBurstScript = preload("res://entities/effects/PixelMagicBurst.gd")
 const BossCastAuraScript = preload("res://entities/effects/BossCastAura.gd")
 const BossComboSlashScript = preload("res://entities/effects/BossComboSlash.gd")
+const EquipmentDropScript = preload("res://entities/items/EquipmentDrop.gd")
+const HealthPotionDropScript = preload("res://entities/items/HealthPotionDrop.gd")
 
 const ARENA_RECT := Rect2(118,138,1044,484)
+const BOSS_LOOT_DAMAGE_INTERVAL := 40
 
 var player: CharacterBody2D
 var boss: CharacterBody2D
@@ -39,6 +42,10 @@ var phase_overlay: Control
 var phase_cards_cast := 0
 var pending_phase := 0
 var last_phase_card := ""
+var boss_loot_damage := 0
+var boss_loot_drops := 0
+var active_loot: Array[Node] = []
+var loot_notice: Label
 
 func _ready() -> void:
 	frost_charges = 0
@@ -79,6 +86,7 @@ func create_player() -> void:
 	player.spell_cast.connect(on_player_spell)
 	player.weapon_fired.connect(on_player_weapon_fired)
 	player.weapon_changed.connect(func(_weapon_id: String): update_player_hud())
+	player.weapon_time_changed.connect(func(_seconds_left: float): update_player_hud())
 	player.hp_changed.connect(func(_current: int,_maximum: int): update_player_hud())
 	player.mana_changed.connect(func(_current: float,_maximum: float): update_player_hud())
 	player.damaged.connect(on_player_damaged)
@@ -90,6 +98,7 @@ func create_boss() -> void:
 	boss.setup(player)
 	add_child(boss)
 	boss.hp_changed.connect(update_boss_hud)
+	boss.damage_taken.connect(on_boss_damage_taken)
 	boss.physical_started.connect(on_boss_physical_started)
 	boss.magic_cast.connect(on_boss_magic_cast)
 	boss.meteor_cast.connect(on_boss_meteor_cast)
@@ -120,8 +129,12 @@ func create_hud() -> void:
 	intent_label.size = Vector2(450,28)
 	for label in [hp_label,mana_label,boss_label,weapon_label,intent_label]:
 		hud_layer.add_child(label)
+	loot_notice = make_label(Vector2(390,100),20,Color("ffe083"))
+	loot_notice.size = Vector2(500,30)
+	loot_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_layer.add_child(loot_notice)
 	var help := make_label(Vector2(235,674),17,Color("dce8d1"))
-	help.text = "J 攻击 · Q 元气弹 · K/Shift 翻滚 · 1/2/3 切换已拾取武器"
+	help.text = "J 攻击 · Q 元气弹 · K/Shift 翻滚 · 1/2/3 切换当前限时武器"
 	help.size = Vector2(810,28)
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hud_layer.add_child(help)
@@ -184,6 +197,59 @@ func on_player_weapon_fired(origin: Vector2, direction: Vector2, weapon_id: Stri
 	projectile.enemy_hit.connect(func(_enemy: Node2D,hit_damage: int,position_value: Vector2,_weapon: String):
 		player.confirm_hit()
 		show_damage(position_value - Vector2(0,54),hit_damage,Color("8feeff" if weapon_id == "arcane_staff" else "ffe08a"))
+	)
+
+func on_boss_damage_taken(amount: int, drop_origin: Vector2) -> void:
+	if amount <= 0 or battle_finished:
+		return
+	boss_loot_damage += amount
+	while boss_loot_damage >= BOSS_LOOT_DAMAGE_INTERVAL:
+		boss_loot_damage -= BOSS_LOOT_DAMAGE_INTERVAL
+		spawn_boss_loot(drop_origin)
+
+func spawn_boss_loot(drop_origin: Vector2) -> void:
+	boss_loot_drops += 1
+	var offset := Vector2.from_angle(boss_loot_drops * 2.4) * 88.0
+	var drop_position := drop_origin + offset
+	drop_position.x = clampf(drop_position.x,ARENA_RECT.position.x + 52.0,ARENA_RECT.end.x - 52.0)
+	drop_position.y = clampf(drop_position.y,ARENA_RECT.position.y + 58.0,ARENA_RECT.end.y - 52.0)
+	var loot: Node
+	if boss_loot_drops % 3 == 2:
+		var weapon_id := "bow" if boss_loot_drops % 2 == 0 else "arcane_staff"
+		var weapon_drop = EquipmentDropScript.new()
+		weapon_drop.global_position = drop_position
+		weapon_drop.setup(weapon_id)
+		weapon_drop.picked.connect(on_boss_weapon_picked)
+		loot = weapon_drop
+		show_loot_notice("炎魔掉落限时武器！")
+	else:
+		var potion_drop = HealthPotionDropScript.new()
+		potion_drop.global_position = drop_position
+		potion_drop.setup(16)
+		potion_drop.picked.connect(on_health_potion_picked)
+		loot = potion_drop
+		show_loot_notice("炎魔掉落回血药剂！")
+	add_child(loot)
+	active_loot.append(loot)
+	loot.tree_exited.connect(func(): active_loot.erase(loot))
+
+func on_boss_weapon_picked(weapon_id: String) -> void:
+	player.activate_temporary_weapon(weapon_id,10.0)
+	update_player_hud()
+	show_loot_notice("装备 %s · 持续 10 秒" % player.weapon_name())
+
+func on_health_potion_picked(amount: int) -> void:
+	update_player_hud()
+	show_loot_notice("恢复 %d 点生命" % amount)
+
+func show_loot_notice(message: String) -> void:
+	if not is_instance_valid(loot_notice):
+		return
+	loot_notice.text = message
+	var expected := message
+	get_tree().create_timer(1.6).timeout.connect(func():
+		if is_instance_valid(loot_notice) and loot_notice.text == expected:
+			loot_notice.text = ""
 	)
 
 func on_boss_physical_started(position_value: Vector2, direction: Vector2, combo_step: int) -> void:
@@ -362,7 +428,8 @@ func update_player_hud() -> void:
 	hud_mana.value = player.mana
 	hp_label.text = "生命 %d / %d" % [GameState.player_hp,GameState.player_max_hp]
 	mana_label.text = "法力 %d / %d" % [roundi(player.mana),roundi(player.MAX_MANA)]
-	weapon_label.text = "当前：%s · 寒霜打断 %d" % [player.weapon_name(),frost_charges]
+	var timer_text := " · %.1fs" % player.temporary_weapon_left if player.current_weapon != "basic" else ""
+	weapon_label.text = "当前：%s%s · 寒霜打断 %d" % [player.weapon_name(),timer_text,frost_charges]
 
 func update_boss_hud(current: int, maximum: int) -> void:
 	if not is_instance_valid(hud_boss):

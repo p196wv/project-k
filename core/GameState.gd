@@ -22,6 +22,8 @@ var legendary_owned: Array[String] = []
 var run_stats: Dictionary = {}
 var unlocked_weapons := {"basic":true,"arcane_staff":false,"bow":false}
 var equipped_weapon := "basic"
+var temporary_weapon_id := ""
+var weapon_time_left := 0.0
 
 func reset_run() -> void:
 	player_max_hp = 60
@@ -36,6 +38,8 @@ func reset_run() -> void:
 	run_stats.clear()
 	unlocked_weapons = {"basic":true,"arcane_staff":false,"bow":false}
 	equipped_weapon = "basic"
+	temporary_weapon_id = ""
+	weapon_time_left = 0.0
 
 func set_phase(value: String) -> void:
 	phase = value

@@ -4,6 +4,7 @@ signal attacked(position: Vector2, direction: Vector2, reach: float)
 signal spell_cast(position: Vector2, direction: Vector2)
 signal weapon_fired(position: Vector2, direction: Vector2, weapon_id: String)
 signal weapon_changed(weapon_id: String)
+signal weapon_time_changed(seconds_left: float)
 signal damaged(amount: int, position: Vector2)
 signal hp_changed(current: int, maximum: int)
 signal mana_changed(current: float, maximum: float)
@@ -25,6 +26,7 @@ const MANA_REGEN := 13.0
 const SPELL_COOLDOWN := 0.72
 const CORNER_ASSIST_DELAY := 0.14
 const STAFF_SHOT_COST := 5.0
+const TEMP_WEAPON_DURATION := 10.0
 
 var facing := Vector2.DOWN
 var attack_direction := Vector2.DOWN
@@ -47,6 +49,8 @@ var body_shape: CapsuleShape2D
 var corner_stuck_time := 0.0
 var current_weapon := "basic"
 var owned_weapons := {"basic":true,"arcane_staff":false,"bow":false}
+var temporary_weapon_id := ""
+var temporary_weapon_left := 0.0
 var combo_step := 0
 var combo_window_left := 0.0
 var combo_buffered := false
@@ -54,6 +58,12 @@ var combo_buffered := false
 func _ready() -> void:
 	owned_weapons = GameState.unlocked_weapons.duplicate()
 	current_weapon = GameState.equipped_weapon if bool(owned_weapons.get(GameState.equipped_weapon,false)) else "basic"
+	temporary_weapon_id = GameState.temporary_weapon_id
+	temporary_weapon_left = GameState.weapon_time_left
+	if temporary_weapon_id.is_empty() or temporary_weapon_left <= 0.0:
+		clear_temporary_weapon()
+		current_weapon = "basic"
+		GameState.equipped_weapon = "basic"
 	collision_layer = 2
 	collision_mask = 1
 	var shape := CollisionShape2D.new()
@@ -103,6 +113,7 @@ func add_sheet_animation(frames: SpriteFrames, name: String, row: int, columns: 
 		frames.add_frame(name,atlas)
 
 func _physics_process(delta: float) -> void:
+	update_temporary_weapon(delta)
 	invincible_left = maxf(0.0,invincible_left - delta)
 	hit_flash_left = maxf(0.0,hit_flash_left - delta)
 	hit_stop_left = maxf(0.0,hit_stop_left - delta)
@@ -237,18 +248,61 @@ func start_spell() -> void:
 	sprite.play("attack_staff_" + direction_name(attack_direction))
 
 func unlock_weapon(weapon_id: String) -> bool:
-	var was_new := not bool(owned_weapons.get(weapon_id,false))
+	var was_new := temporary_weapon_id != weapon_id
+	activate_temporary_weapon(weapon_id,TEMP_WEAPON_DURATION)
+	return was_new
+
+func activate_temporary_weapon(weapon_id: String, duration := TEMP_WEAPON_DURATION) -> void:
+	if weapon_id == "basic" or weapon_id not in ["arcane_staff","bow"]:
+		return
+	if not temporary_weapon_id.is_empty() and temporary_weapon_id != weapon_id:
+		owned_weapons[temporary_weapon_id] = false
+		GameState.unlocked_weapons[temporary_weapon_id] = false
+	temporary_weapon_id = weapon_id
+	temporary_weapon_left = duration
 	owned_weapons[weapon_id] = true
 	GameState.unlocked_weapons[weapon_id] = true
-	if was_new:
-		equip_weapon(weapon_id)
-	return was_new
+	current_weapon = weapon_id
+	GameState.equipped_weapon = weapon_id
+	GameState.temporary_weapon_id = weapon_id
+	GameState.weapon_time_left = duration
+	weapon_changed.emit(current_weapon)
+	weapon_time_changed.emit(temporary_weapon_left)
+
+func update_temporary_weapon(delta: float) -> void:
+	if temporary_weapon_id.is_empty():
+		return
+	var previous_second := ceili(temporary_weapon_left)
+	temporary_weapon_left = maxf(0.0,temporary_weapon_left - delta)
+	GameState.weapon_time_left = temporary_weapon_left
+	if ceili(temporary_weapon_left) != previous_second:
+		weapon_time_changed.emit(temporary_weapon_left)
+	if temporary_weapon_left <= 0.0 and (current_weapon != temporary_weapon_id or attack_left <= 0.0):
+		expire_temporary_weapon()
+
+func expire_temporary_weapon() -> void:
+	var expired_id := temporary_weapon_id
+	clear_temporary_weapon()
+	if current_weapon == expired_id:
+		current_weapon = "basic"
+		GameState.equipped_weapon = "basic"
+		weapon_changed.emit(current_weapon)
+	weapon_time_changed.emit(0.0)
+
+func clear_temporary_weapon() -> void:
+	if not temporary_weapon_id.is_empty():
+		owned_weapons[temporary_weapon_id] = false
+		GameState.unlocked_weapons[temporary_weapon_id] = false
+	temporary_weapon_id = ""
+	temporary_weapon_left = 0.0
+	GameState.temporary_weapon_id = ""
+	GameState.weapon_time_left = 0.0
 
 func has_weapon(weapon_id: String) -> bool:
 	return bool(owned_weapons.get(weapon_id,false))
 
 func equip_weapon(weapon_id: String) -> bool:
-	if not has_weapon(weapon_id) or attack_left > 0.0 or roll_left > 0.0:
+	if not has_weapon(weapon_id) or (weapon_id != "basic" and temporary_weapon_left <= 0.0) or attack_left > 0.0 or roll_left > 0.0:
 		return false
 	current_weapon = weapon_id
 	GameState.equipped_weapon = weapon_id
@@ -256,7 +310,10 @@ func equip_weapon(weapon_id: String) -> bool:
 	return true
 
 func weapon_name() -> String:
-	match current_weapon:
+	return weapon_name_for(current_weapon)
+
+func weapon_name_for(weapon_id: String) -> String:
+	match weapon_id:
 		"bow": return "疾风弓"
 		"arcane_staff": return "潮汐法杖"
 		_: return "基础法杖"

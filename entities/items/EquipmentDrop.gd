@@ -26,9 +26,9 @@ func setup(id_value: String) -> void:
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_child(sprite)
 	var label := Label.new()
-	label.text = "疾风弓" if weapon_id == "bow" else "潮汐法杖"
+	label.text = ("疾风弓" if weapon_id == "bow" else "潮汐法杖") + "\n限时 10 秒"
 	label.position = Vector2(-58,-58)
-	label.size = Vector2(116,28)
+	label.size = Vector2(116,48)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size",16)
 	label.add_theme_color_override("font_color",Color("ffe990") if weapon_id == "bow" else Color("8eeaff"))

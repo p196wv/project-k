@@ -2,6 +2,7 @@ extends CharacterBody2D
 
 signal defeated
 signal hp_changed(current: int, maximum: int)
+signal damage_taken(amount: int, position: Vector2)
 signal physical_started(position: Vector2, direction: Vector2, combo_step: int)
 signal magic_cast(position: Vector2, direction: Vector2, phase_two: bool)
 signal meteor_cast(target_position: Vector2, phase_two: bool)
@@ -202,6 +203,7 @@ func apply_frost_stagger() -> void:
 func take_damage(amount: int, _source := Vector2.ZERO) -> void:
 	if dead or transitioning:
 		return
+	var previous_hp := hp
 	var proposed_hp := maxi(0,hp - amount)
 	var threshold := floori(float(max_hp) * 2.0 / 3.0) if phase_index == 1 else (floori(float(max_hp) / 3.0) if phase_index == 2 else 0)
 	if phase_index < 3 and proposed_hp <= threshold:
@@ -211,11 +213,13 @@ func take_damage(amount: int, _source := Vector2.ZERO) -> void:
 		velocity = Vector2.ZERO
 		hit_flash_left = 0.0
 		hp_changed.emit(hp,max_hp)
+		damage_taken.emit(previous_hp - hp,global_position)
 		phase_transition_requested.emit(phase_index + 1)
 		return
 	hp = proposed_hp
 	hit_flash_left = 0.16
 	hp_changed.emit(hp,max_hp)
+	damage_taken.emit(previous_hp - hp,global_position)
 	if hp <= 0:
 		dead = true
 		velocity = Vector2.ZERO

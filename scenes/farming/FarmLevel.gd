@@ -15,7 +15,7 @@ const PlantObstacleScript = preload("res://entities/environment/PlantObstacle.gd
 const ProceduralTerrainScript = preload("res://entities/environment/ProceduralTerrain.gd")
 const WORLD_SIZE := Vector2(2400,1440)
 const ASSET_ROOT := "res://assets/puny_characters/Puny-Characters/"
-const MAX_ACTIVE_ENEMIES := 24
+const MAX_ACTIVE_ENEMIES := 30
 const WAVE_CLEAR_REMAINDER := 2
 const PRESSURE_ENEMIES_PER_WAVE := 1
 const CARD_DROP_CHANCE := 0.40
@@ -234,6 +234,7 @@ func create_player() -> void:
 	player.spell_cast.connect(on_player_spell)
 	player.weapon_fired.connect(on_player_weapon_fired)
 	player.weapon_changed.connect(on_weapon_changed)
+	player.weapon_time_changed.connect(func(_seconds_left: float): update_weapon_hud())
 	player.damaged.connect(on_player_damaged)
 	player.hp_changed.connect(func(_hp,_maximum): update_hp())
 	player.mana_changed.connect(update_mana)
@@ -246,7 +247,7 @@ func find_safe_player_start(preferred: Vector2) -> Vector2:
 	return find_safe_landmark(preferred,18.0)
 
 func create_enemies() -> void:
-	spawn_wave(10,0,"mixed")
+	spawn_wave(14,0,"mixed")
 
 func spawn_wave(count: int, difficulty_rank: int, pattern: String) -> void:
 	var sheets := ["Orc-Grunt.png","Orc-Peon-Red.png","Orc-Peon-Cyan.png","Orc-Soldier-Red.png"]
@@ -448,7 +449,7 @@ func update_infinite_waves(delta: float) -> void:
 		var available_slots := MAX_ACTIVE_ENEMIES - enemies.size()
 		if available_slots >= 4:
 			wave += 1
-			var spawn_count := mini(available_slots,mini(6 + wave,12))
+			var spawn_count := mini(available_slots,mini(9 + wave,15))
 			spawn_wave(spawn_count,wave - 1,wave_pattern())
 			wave_time_left = maxf(8.0,16.0 - wave * 0.35)
 			toast.text = "清场完成 · 第 %d 波 %s！新增 %d 只兽人" % [wave,wave_pattern_name(),spawn_count]
@@ -691,11 +692,12 @@ func on_enemy_died(enemy: Node2D, rare: bool) -> void:
 		card_drops += 1
 		var card_id := "frost_nova" if rare else "freeze"
 		show_card_pickup(enemy.global_position,card_id)
-	if enemy.role == "ranger" and not player.has_weapon("bow"):
+	# 限时武器保持稀有但稳定可见，避免高怪量下连续铺满地面。
+	if enemy.role == "ranger" and RNG.chance(0.28):
 		spawn_equipment_drop(enemy.global_position,"bow")
-	elif enemy.role == "brute" and not player.has_weapon("arcane_staff"):
+	elif enemy.role == "brute" and RNG.chance(0.24):
 		spawn_equipment_drop(enemy.global_position,"arcane_staff")
-	elif RNG.chance(0.13):
+	elif RNG.chance(0.07):
 		spawn_equipment_drop(enemy.global_position,"arcane_staff" if RNG.chance(0.55) else "bow")
 
 func spawn_equipment_drop(world_pos: Vector2, weapon_id: String) -> void:
@@ -707,14 +709,8 @@ func spawn_equipment_drop(world_pos: Vector2, weapon_id: String) -> void:
 	equipment_drops += 1
 
 func on_equipment_picked(weapon_id: String) -> void:
-	var unlocked: bool = player.unlock_weapon(weapon_id)
-	var message := ""
-	if unlocked:
-		message = "解锁装备：%s · 已自动装备" % player.weapon_name()
-	else:
-		player.restore_mana(18.0)
-		player.heal(3)
-		message = "重复装备分解：回复 18 法力与 3 生命"
+	player.activate_temporary_weapon(weapon_id,10.0)
+	var message := "获得限时武器：%s · 持续 10 秒" % player.weapon_name()
 	equipment_history.append(message)
 	update_weapon_hud()
 	toast.text = message
@@ -802,11 +798,12 @@ func update_weapon_hud() -> void:
 	if not hud_weapon or not is_instance_valid(player):
 		return
 	if player.current_weapon == "bow":
-		hud_weapon.text = "[3] 疾风弓 · 固定伤害 9\n+射速快 / 不耗法力  − 单体伤害"
+		hud_weapon.text = "[3] 疾风弓 · 固定伤害 9 · 剩余 %.1fs\n+射速快 / 不耗法力  − 单体伤害" % player.temporary_weapon_left
 	elif player.current_weapon == "arcane_staff":
-		hud_weapon.text = "[2] 潮汐法杖 · 固定伤害 13\n+命中溅射 5  − 射速慢、每发耗 5 法力"
+		hud_weapon.text = "[2] 潮汐法杖 · 固定伤害 13 · 剩余 %.1fs\n+命中溅射 5  − 射速慢、每发耗 5 法力" % player.temporary_weapon_left
 	else:
-		hud_weapon.text = "[1] 基础法杖 · 固定伤害 10\n+原版扇形挥击  − 必须近身"
+		var reserve := " · %s剩余 %.1fs" % [player.weapon_name_for(player.temporary_weapon_id),player.temporary_weapon_left] if not player.temporary_weapon_id.is_empty() else ""
+		hud_weapon.text = "[1] 基础法杖 · 固定伤害 10%s\n+原版扇形挥击  − 必须近身" % reserve
 
 func update_combo_hud() -> void:
 	if not combo_label:
